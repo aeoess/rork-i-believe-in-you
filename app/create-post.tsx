@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, Alert, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
 import { Stack, useRouter, useLocalSearchParams } from 'expo-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -27,6 +27,12 @@ export default function CreatePostScreen() {
   });
 
   const selectedProject = myProjects.find(p => p.id === selectedProjectId);
+
+  useEffect(() => {
+    if (myProjects.length === 1 && !selectedProjectId) {
+      setSelectedProjectId(myProjects[0].id);
+    }
+  }, [myProjects, selectedProjectId]);
 
   const createMutation = useMutation({
     mutationFn: async () => {
@@ -184,12 +190,11 @@ export default function CreatePostScreen() {
           </View>
         )}
 
-        {myProjects.length === 1 && !selectedProjectId && (
+        {myProjects.length === 1 && (
           <View style={styles.autoSelectInfo}>
             <Text style={styles.autoSelectText}>
               Posting to: <Text style={styles.autoSelectProject}>{myProjects[0].title}</Text>
             </Text>
-            {!selectedProjectId && setSelectedProjectId(myProjects[0].id)}
           </View>
         )}
 
