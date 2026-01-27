@@ -54,6 +54,10 @@ function RootLayoutNav() {
       <Stack.Screen name="onboarding" options={{ headerShown: false }} />
       <Stack.Screen name="project/[slug]" options={{ headerBackTitle: 'Back' }} />
       <Stack.Screen name="creator/[id]" options={{ headerBackTitle: 'Back' }} />
+      <Stack.Screen name="create-project" options={{ presentation: 'modal', headerBackTitle: 'Back' }} />
+      <Stack.Screen name="edit-project" options={{ headerBackTitle: 'Back' }} />
+      <Stack.Screen name="create-post" options={{ presentation: 'modal', headerBackTitle: 'Back' }} />
+      <Stack.Screen name="edit-profile" options={{ headerBackTitle: 'Back' }} />
     </Stack>
   );
 }

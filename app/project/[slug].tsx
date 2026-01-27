@@ -1,9 +1,9 @@
 import { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, ActivityIndicator, RefreshControl, Alert } from 'react-native';
-import { useLocalSearchParams, Stack } from 'expo-router';
-import { useQuery } from '@tanstack/react-query';
-import { Users, Heart, Globe, ExternalLink } from 'lucide-react-native';
-import { getProject, getProjectPosts, getProjectMilestones, getProjectSupportMessages, isFollowingProject } from '@/lib/database';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, ActivityIndicator, RefreshControl, Alert, Modal, TextInput } from 'react-native';
+import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Users, Heart, Globe, ExternalLink, Edit3, Plus, Trash2, MoreVertical } from 'lucide-react-native';
+import { getProject, getProjectPosts, getProjectMilestones, getProjectSupportMessages, isFollowingProject, updateProject, deletePost, createMilestone, updateMilestone, deleteMilestone, toggleMilestoneComplete, Milestone } from '@/lib/database';
 import { useAuth } from '@/contexts/AuthContext';
 import CreatorRow from '@/components/CreatorRow';
 import PostCard from '@/components/PostCard';
@@ -12,6 +12,7 @@ import SupportMessageBubble from '@/components/SupportMessageBubble';
 import Colors from '@/constants/colors';
 
 type TabType = 'about' | 'updates' | 'milestones';
+type MoodType = 'green' | 'yellow' | 'red';
 
 const MOOD_CONFIG = {
   green: { color: '#10B981', label: 'Going great!' },
@@ -21,8 +22,15 @@ const MOOD_CONFIG = {
 
 export default function ProjectPage() {
   const { slug } = useLocalSearchParams<{ slug: string }>();
-  const { user } = useAuth();
+  const { user, builderProfile } = useAuth();
+  const router = useRouter();
+  const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<TabType>('about');
+  const [showMoodPicker, setShowMoodPicker] = useState(false);
+  const [showMilestoneModal, setShowMilestoneModal] = useState(false);
+  const [editingMilestone, setEditingMilestone] = useState<Milestone | null>(null);
+  const [milestoneTitle, setMilestoneTitle] = useState('');
+  const [milestoneDescription, setMilestoneDescription] = useState('');
 
   const { data: project, isLoading, refetch, isRefetching } = useQuery({
     queryKey: ['project', slug],
@@ -30,13 +38,13 @@ export default function ProjectPage() {
     enabled: !!slug,
   });
 
-  const { data: posts = [] } = useQuery({
+  const { data: posts = [], refetch: refetchPosts } = useQuery({
     queryKey: ['projectPosts', project?.id],
     queryFn: () => getProjectPosts(project?.id || ''),
     enabled: !!project?.id,
   });
 
-  const { data: milestones = [] } = useQuery({
+  const { data: milestones = [], refetch: refetchMilestones } = useQuery({
     queryKey: ['projectMilestones', project?.id],
     queryFn: () => getProjectMilestones(project?.id || ''),
     enabled: !!project?.id,
@@ -54,12 +62,133 @@ export default function ProjectPage() {
     enabled: !!user?.id && !!project?.id,
   });
 
+  const isOwner = project?.builder?.user_id === user?.id;
+
+  const updateMoodMutation = useMutation({
+    mutationFn: (mood: MoodType) => updateProject(project!.id, { mood }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['project', slug] });
+      setShowMoodPicker(false);
+    },
+  });
+
+  const deletePostMutation = useMutation({
+    mutationFn: (postId: string) => deletePost(postId),
+    onSuccess: () => {
+      refetchPosts();
+      queryClient.invalidateQueries({ queryKey: ['feedPosts'] });
+    },
+  });
+
+  const createMilestoneMutation = useMutation({
+    mutationFn: () => createMilestone({
+      project_id: project!.id,
+      title: milestoneTitle.trim(),
+      description: milestoneDescription.trim() || undefined,
+    }),
+    onSuccess: () => {
+      refetchMilestones();
+      setShowMilestoneModal(false);
+      setMilestoneTitle('');
+      setMilestoneDescription('');
+    },
+  });
+
+  const updateMilestoneMutation = useMutation({
+    mutationFn: () => updateMilestone(editingMilestone!.id, {
+      title: milestoneTitle.trim(),
+      description: milestoneDescription.trim() || null,
+    }),
+    onSuccess: () => {
+      refetchMilestones();
+      setShowMilestoneModal(false);
+      setEditingMilestone(null);
+      setMilestoneTitle('');
+      setMilestoneDescription('');
+    },
+  });
+
+  const toggleMilestoneMutation = useMutation({
+    mutationFn: ({ id, isCompleted }: { id: string; isCompleted: boolean }) => 
+      toggleMilestoneComplete(id, isCompleted),
+    onSuccess: () => refetchMilestones(),
+  });
+
+  const deleteMilestoneMutation = useMutation({
+    mutationFn: (id: string) => deleteMilestone(id),
+    onSuccess: () => refetchMilestones(),
+  });
+
   const handleFollowPress = () => {
     Alert.alert('Coming Soon', 'Follow functionality will be available soon!');
   };
 
   const handleSupportPress = () => {
     Alert.alert('Coming Soon', 'Send support functionality will be available soon!');
+  };
+
+  const handleEditProject = () => {
+    router.push(`/edit-project?slug=${slug}`);
+  };
+
+  const handleNewUpdate = () => {
+    router.push(`/create-post?projectId=${project?.id}`);
+  };
+
+  const handleDeletePost = (postId: string) => {
+    Alert.alert(
+      'Delete Update?',
+      'This action cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Delete', 
+          style: 'destructive', 
+          onPress: () => deletePostMutation.mutate(postId)
+        },
+      ]
+    );
+  };
+
+  const handleAddMilestone = () => {
+    setEditingMilestone(null);
+    setMilestoneTitle('');
+    setMilestoneDescription('');
+    setShowMilestoneModal(true);
+  };
+
+  const handleEditMilestone = (milestone: Milestone) => {
+    setEditingMilestone(milestone);
+    setMilestoneTitle(milestone.title);
+    setMilestoneDescription(milestone.description || '');
+    setShowMilestoneModal(true);
+  };
+
+  const handleDeleteMilestone = (milestoneId: string) => {
+    Alert.alert(
+      'Delete Milestone?',
+      'This action cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Delete', 
+          style: 'destructive', 
+          onPress: () => deleteMilestoneMutation.mutate(milestoneId)
+        },
+      ]
+    );
+  };
+
+  const handleSaveMilestone = () => {
+    if (!milestoneTitle.trim()) {
+      Alert.alert('Error', 'Milestone title is required');
+      return;
+    }
+    if (editingMilestone) {
+      updateMilestoneMutation.mutate();
+    } else {
+      createMilestoneMutation.mutate();
+    }
   };
 
   if (isLoading) {
@@ -95,7 +224,16 @@ export default function ProjectPage() {
         />
       }
     >
-      <Stack.Screen options={{ title: project.title }} />
+      <Stack.Screen 
+        options={{ 
+          title: project.title,
+          headerRight: isOwner ? () => (
+            <TouchableOpacity onPress={handleEditProject} style={styles.headerButton}>
+              <Edit3 size={20} color={Colors.primary} />
+            </TouchableOpacity>
+          ) : undefined,
+        }} 
+      />
       
       <View style={styles.coverContainer}>
         {project.cover_image_url ? (
@@ -114,10 +252,15 @@ export default function ProjectPage() {
         )}
 
         {moodConfig && (
-          <View style={styles.moodRow}>
+          <TouchableOpacity 
+            style={styles.moodRow} 
+            onPress={() => isOwner && setShowMoodPicker(true)}
+            disabled={!isOwner}
+          >
             <View style={[styles.moodDot, { backgroundColor: moodConfig.color }]} />
             <Text style={styles.moodLabel}>{moodConfig.label}</Text>
-          </View>
+            {isOwner && <Edit3 size={12} color={Colors.textTertiary} />}
+          </TouchableOpacity>
         )}
 
         {project.builder && (
@@ -196,10 +339,24 @@ export default function ProjectPage() {
 
         {activeTab === 'updates' && (
           <View style={styles.postsContainer}>
+            {isOwner && (
+              <TouchableOpacity style={styles.newUpdateButton} onPress={handleNewUpdate}>
+                <Plus size={18} color={Colors.primary} />
+                <Text style={styles.newUpdateText}>Post New Update</Text>
+              </TouchableOpacity>
+            )}
             {posts.length > 0 ? (
               posts.map((post) => (
                 <View key={post.id} style={styles.postItem}>
                   <PostCard post={post} showProjectInfo={false} />
+                  {isOwner && (
+                    <TouchableOpacity 
+                      style={styles.deletePostButton}
+                      onPress={() => handleDeletePost(post.id)}
+                    >
+                      <Trash2 size={16} color={Colors.error} />
+                    </TouchableOpacity>
+                  )}
                 </View>
               ))
             ) : (
@@ -210,9 +367,24 @@ export default function ProjectPage() {
 
         {activeTab === 'milestones' && (
           <View style={styles.milestonesContainer}>
+            {isOwner && (
+              <TouchableOpacity style={styles.addMilestoneButton} onPress={handleAddMilestone}>
+                <Plus size={18} color={Colors.primary} />
+                <Text style={styles.addMilestoneText}>Add Milestone</Text>
+              </TouchableOpacity>
+            )}
             {milestones.length > 0 ? (
               milestones.map((milestone) => (
-                <MilestoneItem key={milestone.id} milestone={milestone} />
+                <MilestoneItem 
+                  key={milestone.id} 
+                  milestone={milestone}
+                  isOwner={isOwner}
+                  onToggleComplete={(isCompleted) => 
+                    toggleMilestoneMutation.mutate({ id: milestone.id, isCompleted })
+                  }
+                  onEdit={() => handleEditMilestone(milestone)}
+                  onDelete={() => handleDeleteMilestone(milestone.id)}
+                />
               ))
             ) : (
               <Text style={styles.noContent}>No milestones yet</Text>
@@ -235,6 +407,92 @@ export default function ProjectPage() {
       )}
 
       <View style={styles.bottomPadding} />
+
+      <Modal
+        visible={showMoodPicker}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowMoodPicker(false)}
+      >
+        <TouchableOpacity 
+          style={styles.modalOverlay} 
+          activeOpacity={1} 
+          onPress={() => setShowMoodPicker(false)}
+        >
+          <View style={styles.moodPickerContainer}>
+            <Text style={styles.moodPickerTitle}>How's it going?</Text>
+            {(Object.keys(MOOD_CONFIG) as MoodType[]).map((mood) => (
+              <TouchableOpacity
+                key={mood}
+                style={styles.moodOption}
+                onPress={() => updateMoodMutation.mutate(mood)}
+              >
+                <View style={[styles.moodOptionDot, { backgroundColor: MOOD_CONFIG[mood].color }]} />
+                <Text style={styles.moodOptionLabel}>{MOOD_CONFIG[mood].label}</Text>
+                {project.mood === mood && (
+                  <View style={styles.moodSelectedIndicator} />
+                )}
+              </TouchableOpacity>
+            ))}
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      <Modal
+        visible={showMilestoneModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowMilestoneModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.milestoneModalContainer}>
+            <Text style={styles.milestoneModalTitle}>
+              {editingMilestone ? 'Edit Milestone' : 'Add Milestone'}
+            </Text>
+            <View style={styles.milestoneInputContainer}>
+              <Text style={styles.milestoneInputLabel}>Title *</Text>
+              <TextInput
+                style={styles.milestoneTextInputField}
+                value={milestoneTitle}
+                onChangeText={setMilestoneTitle}
+                placeholder="Milestone title"
+                placeholderTextColor={Colors.textTertiary}
+              />
+            </View>
+            <View style={styles.milestoneInputContainer}>
+              <Text style={styles.milestoneInputLabel}>Description</Text>
+              <TextInput
+                style={styles.milestoneTextInputField}
+                value={milestoneDescription}
+                onChangeText={setMilestoneDescription}
+                placeholder="Optional description"
+                placeholderTextColor={Colors.textTertiary}
+              />
+            </View>
+            <View style={styles.milestoneModalActions}>
+              <TouchableOpacity 
+                style={styles.milestoneModalCancel}
+                onPress={() => {
+                  setShowMilestoneModal(false);
+                  setEditingMilestone(null);
+                  setMilestoneTitle('');
+                  setMilestoneDescription('');
+                }}
+              >
+                <Text style={styles.milestoneModalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={styles.milestoneModalSave}
+                onPress={handleSaveMilestone}
+              >
+                <Text style={styles.milestoneModalSaveText}>
+                  {editingMilestone ? 'Save' : 'Add'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
@@ -259,6 +517,9 @@ const styles = StyleSheet.create({
   errorText: {
     fontSize: 16,
     color: Colors.textSecondary,
+  },
+  headerButton: {
+    padding: 8,
   },
   coverContainer: {
     height: 200,
@@ -429,8 +690,55 @@ const styles = StyleSheet.create({
   postsContainer: {
     gap: 16,
   },
-  postItem: {},
+  newUpdateButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: Colors.primary,
+    borderStyle: 'dashed',
+    marginBottom: 8,
+  },
+  newUpdateText: {
+    fontSize: 15,
+    fontWeight: '600' as const,
+    color: Colors.primary,
+  },
+  postItem: {
+    position: 'relative',
+  },
+  deletePostButton: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    backgroundColor: Colors.error + '15',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   milestonesContainer: {},
+  addMilestoneButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: Colors.primary,
+    borderStyle: 'dashed',
+    marginBottom: 16,
+  },
+  addMilestoneText: {
+    fontSize: 15,
+    fontWeight: '600' as const,
+    color: Colors.primary,
+  },
   supportSection: {
     padding: 20,
     paddingTop: 0,
@@ -447,5 +755,113 @@ const styles = StyleSheet.create({
   messageItem: {},
   bottomPadding: {
     height: 40,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  moodPickerContainer: {
+    backgroundColor: Colors.surface,
+    borderRadius: 16,
+    padding: 20,
+    width: '100%',
+    maxWidth: 320,
+  },
+  moodPickerTitle: {
+    fontSize: 18,
+    fontWeight: '600' as const,
+    color: Colors.text,
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  moodOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.borderLight,
+  },
+  moodOptionDot: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+  },
+  moodOptionLabel: {
+    flex: 1,
+    fontSize: 16,
+    color: Colors.text,
+  },
+  moodSelectedIndicator: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: Colors.primary,
+  },
+  milestoneModalContainer: {
+    backgroundColor: Colors.surface,
+    borderRadius: 16,
+    padding: 20,
+    width: '100%',
+    maxWidth: 400,
+  },
+  milestoneModalTitle: {
+    fontSize: 18,
+    fontWeight: '600' as const,
+    color: Colors.text,
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  milestoneInputContainer: {
+    marginBottom: 16,
+  },
+  milestoneInputLabel: {
+    fontSize: 14,
+    fontWeight: '600' as const,
+    color: Colors.text,
+    marginBottom: 8,
+  },
+  milestoneTextInputField: {
+    backgroundColor: Colors.surface,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontSize: 16,
+    color: Colors.text,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  milestoneModalActions: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 8,
+  },
+  milestoneModalCancel: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+  },
+  milestoneModalCancelText: {
+    fontSize: 15,
+    fontWeight: '600' as const,
+    color: Colors.textSecondary,
+  },
+  milestoneModalSave: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    backgroundColor: Colors.primary,
+  },
+  milestoneModalSaveText: {
+    fontSize: 15,
+    fontWeight: '600' as const,
+    color: Colors.textInverse,
   },
 });

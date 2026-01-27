@@ -436,3 +436,278 @@ export async function getProjectSupportMessages(
 
   return data || [];
 }
+
+// ==================== PROJECTS - CREATE & UPDATE ====================
+
+export function generateSlug(title: string): string {
+  const baseSlug = title
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .trim();
+  
+  const randomSuffix = Math.random().toString(36).substring(2, 6);
+  return `${baseSlug}-${randomSuffix}`;
+}
+
+export async function checkSlugExists(slug: string): Promise<boolean> {
+  const { data } = await supabase
+    .from('projects')
+    .select('id')
+    .eq('public_slug', slug)
+    .single();
+  
+  return !!data;
+}
+
+export async function createProject(params: {
+  builder_id: string;
+  title: string;
+  tagline: string;
+  description?: string;
+  cover_image_url?: string;
+  public_slug: string;
+}): Promise<Project | null> {
+  console.log('Creating project:', params.title);
+  
+  const { data, error } = await supabase
+    .from('projects')
+    .insert({
+      builder_id: params.builder_id,
+      title: params.title,
+      tagline: params.tagline,
+      description: params.description || null,
+      cover_image_url: params.cover_image_url || null,
+      public_slug: params.public_slug,
+      mood: 'green',
+      follower_count: 0,
+      is_published: true,
+    })
+    .select(`
+      *,
+      builder:builders(*)
+    `)
+    .single();
+
+  if (error) {
+    console.log('Error creating project:', error.message);
+    return null;
+  }
+
+  console.log('Project created:', data);
+  return data;
+}
+
+export async function updateProject(
+  projectId: string,
+  updates: Partial<Pick<Project, 'title' | 'tagline' | 'description' | 'cover_image_url' | 'public_slug' | 'mood' | 'is_published'>>
+): Promise<Project | null> {
+  console.log('Updating project:', projectId, updates);
+  
+  const { data, error } = await supabase
+    .from('projects')
+    .update({ ...updates, updated_at: new Date().toISOString() })
+    .eq('id', projectId)
+    .select(`
+      *,
+      builder:builders(*)
+    `)
+    .single();
+
+  if (error) {
+    console.log('Error updating project:', error.message);
+    return null;
+  }
+
+  console.log('Project updated:', data);
+  return data;
+}
+
+export async function deleteProject(projectId: string): Promise<boolean> {
+  console.log('Deleting project:', projectId);
+  
+  const { error } = await supabase
+    .from('projects')
+    .delete()
+    .eq('id', projectId);
+
+  if (error) {
+    console.log('Error deleting project:', error.message);
+    return false;
+  }
+
+  console.log('Project deleted successfully');
+  return true;
+}
+
+// ==================== POSTS - CREATE & UPDATE ====================
+
+export async function createPost(params: {
+  project_id: string;
+  content: string;
+  images?: string[];
+}): Promise<Post | null> {
+  console.log('Creating post for project:', params.project_id);
+  
+  const { data, error } = await supabase
+    .from('posts')
+    .insert({
+      project_id: params.project_id,
+      content: params.content,
+      images: params.images || null,
+      like_count: 0,
+    })
+    .select('*')
+    .single();
+
+  if (error) {
+    console.log('Error creating post:', error.message);
+    return null;
+  }
+
+  console.log('Post created:', data);
+  return data;
+}
+
+export async function updatePost(
+  postId: string,
+  updates: Partial<Pick<Post, 'content' | 'images'>>
+): Promise<Post | null> {
+  console.log('Updating post:', postId, updates);
+  
+  const { data, error } = await supabase
+    .from('posts')
+    .update({ ...updates, updated_at: new Date().toISOString() })
+    .eq('id', postId)
+    .select('*')
+    .single();
+
+  if (error) {
+    console.log('Error updating post:', error.message);
+    return null;
+  }
+
+  console.log('Post updated:', data);
+  return data;
+}
+
+export async function deletePost(postId: string): Promise<boolean> {
+  console.log('Deleting post:', postId);
+  
+  const { error } = await supabase
+    .from('posts')
+    .delete()
+    .eq('id', postId);
+
+  if (error) {
+    console.log('Error deleting post:', error.message);
+    return false;
+  }
+
+  console.log('Post deleted successfully');
+  return true;
+}
+
+// ==================== MILESTONES - CREATE & UPDATE ====================
+
+export async function createMilestone(params: {
+  project_id: string;
+  title: string;
+  description?: string;
+  target_date?: string;
+}): Promise<Milestone | null> {
+  console.log('Creating milestone for project:', params.project_id);
+  
+  const { data, error } = await supabase
+    .from('milestones')
+    .insert({
+      project_id: params.project_id,
+      title: params.title,
+      description: params.description || null,
+      target_date: params.target_date || null,
+      is_completed: false,
+    })
+    .select('*')
+    .single();
+
+  if (error) {
+    console.log('Error creating milestone:', error.message);
+    return null;
+  }
+
+  console.log('Milestone created:', data);
+  return data;
+}
+
+export async function updateMilestone(
+  milestoneId: string,
+  updates: Partial<Pick<Milestone, 'title' | 'description' | 'target_date' | 'is_completed' | 'completed_at'>>
+): Promise<Milestone | null> {
+  console.log('Updating milestone:', milestoneId, updates);
+  
+  const { data, error } = await supabase
+    .from('milestones')
+    .update(updates)
+    .eq('id', milestoneId)
+    .select('*')
+    .single();
+
+  if (error) {
+    console.log('Error updating milestone:', error.message);
+    return null;
+  }
+
+  console.log('Milestone updated:', data);
+  return data;
+}
+
+export async function toggleMilestoneComplete(milestoneId: string, isCompleted: boolean): Promise<Milestone | null> {
+  console.log('Toggling milestone complete:', milestoneId, isCompleted);
+  
+  const updates = isCompleted
+    ? { is_completed: true, completed_at: new Date().toISOString() }
+    : { is_completed: false, completed_at: null };
+  
+  return updateMilestone(milestoneId, updates);
+}
+
+export async function deleteMilestone(milestoneId: string): Promise<boolean> {
+  console.log('Deleting milestone:', milestoneId);
+  
+  const { error } = await supabase
+    .from('milestones')
+    .delete()
+    .eq('id', milestoneId);
+
+  if (error) {
+    console.log('Error deleting milestone:', error.message);
+    return false;
+  }
+
+  console.log('Milestone deleted successfully');
+  return true;
+}
+
+// ==================== BUILDER PROFILE - UPDATE ====================
+
+export async function updateBuilderProfileFull(
+  userId: string,
+  updates: Partial<Pick<Builder, 'name' | 'bio' | 'avatar_url' | 'website_url' | 'twitter_handle' | 'is_creator'>>
+): Promise<Builder | null> {
+  console.log('Updating builder profile (full):', userId, updates);
+  const { data, error } = await supabase
+    .from('builders')
+    .update({ ...updates, updated_at: new Date().toISOString() })
+    .eq('user_id', userId)
+    .select('*')
+    .single();
+
+  if (error) {
+    console.log('Error updating builder profile:', error.message);
+    return null;
+  }
+
+  console.log('Builder profile updated:', data);
+  return data;
+}

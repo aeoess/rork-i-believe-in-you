@@ -1,6 +1,6 @@
 import { View, Text, StyleSheet, TouchableOpacity, Image, ScrollView, ActivityIndicator } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
-import { User, Edit3, LogOut, Folder, ChevronRight, Plus } from 'lucide-react-native';
+import { User, Edit3, LogOut, Folder, ChevronRight, Plus, PenSquare } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
@@ -28,7 +28,19 @@ export default function ProfileScreen() {
   });
 
   const handleCreateProject = () => {
-    console.log('Create project - coming soon');
+    router.push('/create-project');
+  };
+
+  const handleCreatePost = () => {
+    router.push('/create-post');
+  };
+
+  const handleEditProfile = () => {
+    router.push('/edit-profile');
+  };
+
+  const handleEditProject = (slug: string) => {
+    router.push(`/edit-project?slug=${slug}`);
   };
 
   return (
@@ -55,7 +67,7 @@ export default function ProfileScreen() {
         <Text style={styles.name}>{displayName}</Text>
         <Text style={styles.bio}>{bio}</Text>
         
-        <TouchableOpacity style={styles.editButton}>
+        <TouchableOpacity style={styles.editButton} onPress={handleEditProfile}>
           <Edit3 size={16} color={Colors.primary} />
           <Text style={styles.editButtonText}>Edit Profile</Text>
         </TouchableOpacity>
@@ -79,7 +91,17 @@ export default function ProfileScreen() {
           <View style={styles.projectsList}>
             {myProjects.map((project) => (
               <View key={project.id} style={styles.projectItem}>
-                <ProjectCard project={project} variant="horizontal" />
+                <View style={styles.projectWithEdit}>
+                  <View style={styles.projectCardWrapper}>
+                    <ProjectCard project={project} variant="horizontal" />
+                  </View>
+                  <TouchableOpacity 
+                    style={styles.editProjectButton}
+                    onPress={() => handleEditProject(project.public_slug)}
+                  >
+                    <Edit3 size={16} color={Colors.textSecondary} />
+                  </TouchableOpacity>
+                </View>
               </View>
             ))}
           </View>
@@ -102,6 +124,14 @@ export default function ProfileScreen() {
           </TouchableOpacity>
         )}
       </View>
+
+      {isCreator && myProjects.length > 0 && (
+        <View style={styles.fabContainer}>
+          <TouchableOpacity style={styles.fab} onPress={handleCreatePost}>
+            <PenSquare size={22} color={Colors.textInverse} />
+          </TouchableOpacity>
+        </View>
+      )}
 
       <View style={styles.section}>
         <TouchableOpacity style={styles.signOutButton} onPress={signOut} testID="signout-button">
@@ -220,6 +250,41 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   projectItem: {},
+  projectWithEdit: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  projectCardWrapper: {
+    flex: 1,
+  },
+  editProjectButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: Colors.surfaceSecondary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fabContainer: {
+    position: 'absolute',
+    right: 20,
+    bottom: 100,
+    zIndex: 10,
+  },
+  fab: {
+    width: 56,
+    height: 56,
+    borderRadius: 16,
+    backgroundColor: Colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: Colors.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
   card: {
     flexDirection: 'row',
     alignItems: 'center',
