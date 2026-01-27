@@ -1,11 +1,16 @@
-import { View, Text, StyleSheet, TouchableOpacity, Image, ScrollView } from 'react-native';
-import { User, Edit3, LogOut, Folder, ChevronRight } from 'lucide-react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image, ScrollView, ActivityIndicator } from 'react-native';
+import { useQuery } from '@tanstack/react-query';
+import { User, Edit3, LogOut, Folder, ChevronRight, Plus } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
+import { getProjectsByBuilder } from '@/lib/database';
+import ProjectCard from '@/components/ProjectCard';
 import Colors from '@/constants/colors';
 
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const { builderProfile, signOut, user } = useAuth();
 
   const displayName = builderProfile?.name || user?.email?.split('@')[0] || 'User';
@@ -13,10 +18,24 @@ export default function ProfileScreen() {
   const avatarUrl = builderProfile?.avatar_url;
   const isCreator = builderProfile?.is_creator ?? false;
 
+  const { 
+    data: myProjects = [], 
+    isLoading: loadingProjects 
+  } = useQuery({
+    queryKey: ['myProjects', builderProfile?.id],
+    queryFn: () => getProjectsByBuilder(builderProfile?.id || ''),
+    enabled: !!builderProfile?.id && isCreator,
+  });
+
+  const handleCreateProject = () => {
+    console.log('Create project - coming soon');
+  };
+
   return (
     <ScrollView
       style={styles.container}
       contentContainerStyle={{ paddingBottom: insets.bottom + 20 }}
+      showsVerticalScrollIndicator={false}
     >
       <View style={styles.profileHeader}>
         <View style={styles.avatarContainer}>
@@ -43,23 +62,45 @@ export default function ProfileScreen() {
       </View>
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>My Projects</Text>
-        <View style={styles.card}>
-          <View style={styles.cardIcon}>
-            <Folder size={24} color={Colors.textTertiary} />
-          </View>
-          <View style={styles.cardContent}>
-            <Text style={styles.cardTitle}>
-              {isCreator ? 'No projects yet' : 'Become a creator'}
-            </Text>
-            <Text style={styles.cardSubtitle}>
-              {isCreator
-                ? 'Start sharing your journey'
-                : 'Share your project with supporters'}
-            </Text>
-          </View>
-          <ChevronRight size={20} color={Colors.textTertiary} />
+        <View style={styles.sectionHeaderRow}>
+          <Text style={styles.sectionTitle}>My Projects</Text>
+          {isCreator && myProjects.length > 0 && (
+            <TouchableOpacity style={styles.addButton} onPress={handleCreateProject}>
+              <Plus size={16} color={Colors.primary} />
+            </TouchableOpacity>
+          )}
         </View>
+
+        {loadingProjects ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="small" color={Colors.primary} />
+          </View>
+        ) : myProjects.length > 0 ? (
+          <View style={styles.projectsList}>
+            {myProjects.map((project) => (
+              <View key={project.id} style={styles.projectItem}>
+                <ProjectCard project={project} variant="horizontal" />
+              </View>
+            ))}
+          </View>
+        ) : (
+          <TouchableOpacity style={styles.card} onPress={handleCreateProject}>
+            <View style={styles.cardIcon}>
+              <Folder size={24} color={Colors.textTertiary} />
+            </View>
+            <View style={styles.cardContent}>
+              <Text style={styles.cardTitle}>
+                {isCreator ? 'No projects yet' : 'Become a creator'}
+              </Text>
+              <Text style={styles.cardSubtitle}>
+                {isCreator
+                  ? 'Start sharing your journey'
+                  : 'Share your project with supporters'}
+              </Text>
+            </View>
+            <ChevronRight size={20} color={Colors.textTertiary} />
+          </TouchableOpacity>
+        )}
       </View>
 
       <View style={styles.section}>
@@ -152,12 +193,33 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 24,
   },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
   sectionTitle: {
     fontSize: 18,
     fontWeight: '600' as const,
     color: Colors.text,
-    marginBottom: 12,
   },
+  addButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    backgroundColor: Colors.primaryLight + '20',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadingContainer: {
+    padding: 40,
+    alignItems: 'center',
+  },
+  projectsList: {
+    gap: 12,
+  },
+  projectItem: {},
   card: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -52,6 +52,8 @@ function RootLayoutNav() {
       <Stack.Screen name="login" options={{ headerShown: false }} />
       <Stack.Screen name="signup" options={{ headerShown: false }} />
       <Stack.Screen name="onboarding" options={{ headerShown: false }} />
+      <Stack.Screen name="project/[slug]" options={{ headerBackTitle: 'Back' }} />
+      <Stack.Screen name="creator/[id]" options={{ headerBackTitle: 'Back' }} />
     </Stack>
   );
 }

@@ -1,26 +1,70 @@
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, RefreshControl } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Heart, Star, Compass } from 'lucide-react-native';
+import { useQuery } from '@tanstack/react-query';
+import { Heart, Star, Compass, Award, Zap } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
+import { getFollowedProjects } from '@/lib/database';
+import ProjectCard from '@/components/ProjectCard';
 import Colors from '@/constants/colors';
+
+const KARMA_LEVELS = [
+  { min: 0, label: 'Newcomer', icon: Star },
+  { min: 50, label: 'Supporter', icon: Heart },
+  { min: 200, label: 'Champion', icon: Award },
+  { min: 500, label: 'Super Fan', icon: Zap },
+];
+
+function getKarmaLevel(points: number) {
+  for (let i = KARMA_LEVELS.length - 1; i >= 0; i--) {
+    if (points >= KARMA_LEVELS[i].min) {
+      return KARMA_LEVELS[i];
+    }
+  }
+  return KARMA_LEVELS[0];
+}
 
 export default function MySupportScreen() {
   const router = useRouter();
-  const { karma } = useAuth();
+  const { karma, user } = useAuth();
 
   const karmaPoints = karma?.total_points ?? 0;
-  const karmaLevel = karma?.level ?? 1;
+  const karmaLevelInfo = getKarmaLevel(karmaPoints);
+  const KarmaIcon = karmaLevelInfo.icon;
+
+  const { 
+    data: followedProjects = [], 
+    isLoading, 
+    refetch, 
+    isRefetching 
+  } = useQuery({
+    queryKey: ['followedProjects', user?.id],
+    queryFn: () => user?.id ? getFollowedProjects(user.id) : Promise.resolve([]),
+    enabled: !!user?.id,
+  });
 
   return (
-    <View style={styles.container}>
+    <ScrollView 
+      style={styles.container}
+      showsVerticalScrollIndicator={false}
+      refreshControl={
+        <RefreshControl
+          refreshing={isRefetching}
+          onRefresh={refetch}
+          tintColor={Colors.primary}
+          colors={[Colors.primary]}
+        />
+      }
+    >
       <View style={styles.karmaCard}>
         <View style={styles.karmaIconContainer}>
-          <Star size={32} color={Colors.karma} fill={Colors.karmaLight} />
+          <KarmaIcon size={32} color={Colors.textInverse} fill={Colors.textInverse + '40'} />
         </View>
         <View style={styles.karmaContent}>
           <Text style={styles.karmaLabel}>Your Karma</Text>
           <Text style={styles.karmaPoints}>{karmaPoints}</Text>
-          <Text style={styles.karmaLevel}>Level {karmaLevel}</Text>
+          <View style={styles.levelBadge}>
+            <Text style={styles.levelText}>{karmaLevelInfo.label}</Text>
+          </View>
         </View>
         <View style={styles.karmaDecor}>
           <View style={[styles.decorDot, styles.decorDot1]} />
@@ -29,27 +73,47 @@ export default function MySupportScreen() {
         </View>
       </View>
 
+      <View style={styles.tipCard}>
+        <Text style={styles.tipText}>💡 Keep supporting creators to earn more karma and level up!</Text>
+      </View>
+
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Projects you support</Text>
         
-        <View style={styles.emptyState}>
-          <View style={styles.emptyIcon}>
-            <Heart size={36} color={Colors.textTertiary} />
+        {isLoading ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="small" color={Colors.primary} />
           </View>
-          <Text style={styles.emptyTitle}>No projects yet</Text>
-          <Text style={styles.emptyText}>
-            Find projects you believe in and show your support
-          </Text>
-          <TouchableOpacity
-            style={styles.discoverButton}
-            onPress={() => router.push('/(tabs)/discover')}
-          >
-            <Compass size={18} color={Colors.textInverse} />
-            <Text style={styles.discoverButtonText}>Discover Projects</Text>
-          </TouchableOpacity>
-        </View>
+        ) : followedProjects.length > 0 ? (
+          <View style={styles.projectsList}>
+            {followedProjects.map((project) => (
+              <View key={project.id} style={styles.projectItem}>
+                <ProjectCard project={project} variant="horizontal" />
+              </View>
+            ))}
+          </View>
+        ) : (
+          <View style={styles.emptyState}>
+            <View style={styles.emptyIcon}>
+              <Heart size={36} color={Colors.textTertiary} />
+            </View>
+            <Text style={styles.emptyTitle}>No projects yet</Text>
+            <Text style={styles.emptyText}>
+              Find projects you believe in and show your support
+            </Text>
+            <TouchableOpacity
+              style={styles.discoverButton}
+              onPress={() => router.push('/(tabs)/discover')}
+            >
+              <Compass size={18} color={Colors.textInverse} />
+              <Text style={styles.discoverButtonText}>Discover Projects</Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </View>
-    </View>
+
+      <View style={styles.bottomPadding} />
+    </ScrollView>
   );
 }
 
@@ -90,10 +154,18 @@ const styles = StyleSheet.create({
     color: Colors.textInverse,
     letterSpacing: -1,
   },
-  karmaLevel: {
-    fontSize: 14,
-    color: 'rgba(255,255,255,0.7)',
-    marginTop: 2,
+  levelBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+    marginTop: 6,
+  },
+  levelText: {
+    fontSize: 13,
+    fontWeight: '600' as const,
+    color: Colors.textInverse,
   },
   karmaDecor: {
     position: 'absolute',
@@ -123,6 +195,18 @@ const styles = StyleSheet.create({
     right: 100,
     top: 20,
   },
+  tipCard: {
+    marginHorizontal: 20,
+    marginBottom: 20,
+    padding: 14,
+    backgroundColor: Colors.primaryLight + '15',
+    borderRadius: 14,
+  },
+  tipText: {
+    fontSize: 14,
+    color: Colors.primary,
+    textAlign: 'center',
+  },
   section: {
     paddingHorizontal: 20,
   },
@@ -132,6 +216,14 @@ const styles = StyleSheet.create({
     color: Colors.text,
     marginBottom: 16,
   },
+  loadingContainer: {
+    padding: 40,
+    alignItems: 'center',
+  },
+  projectsList: {
+    gap: 12,
+  },
+  projectItem: {},
   emptyState: {
     backgroundColor: Colors.surface,
     borderRadius: 20,
@@ -175,5 +267,8 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600' as const,
     color: Colors.textInverse,
+  },
+  bottomPadding: {
+    height: 40,
   },
 });
