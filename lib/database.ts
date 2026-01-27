@@ -363,7 +363,7 @@ export async function getFollowedProjects(userId: string): Promise<Project[]> {
     return [];
   }
 
-  return (data?.map(d => d.project).filter(Boolean) as Project[]) || [];
+  return (data?.map(d => d.project).filter(Boolean) as unknown as Project[]) || [];
 }
 
 export async function isFollowingProject(userId: string, projectId: string): Promise<boolean> {
