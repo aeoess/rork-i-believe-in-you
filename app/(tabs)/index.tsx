@@ -1,15 +1,17 @@
+import { useState, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, FlatList, ActivityIndicator, RefreshControl } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import { Compass, Sparkles } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
-import { getFeedPosts, Post } from '@/lib/database';
+import { getFeedPosts, getUserLikedPostIds, Post } from '@/lib/database';
 import PostCard from '@/components/PostCard';
 import Colors from '@/constants/colors';
 
 export default function HomeScreen() {
   const router = useRouter();
   const { user } = useAuth();
+  const [likedPostIds, setLikedPostIds] = useState<string[]>([]);
 
   const { 
     data: posts = [], 
@@ -22,11 +24,39 @@ export default function HomeScreen() {
     enabled: !!user?.id,
   });
 
-  const renderPost = ({ item }: { item: Post }) => (
+  useQuery({
+    queryKey: ['feedPostLikes', user?.id, posts.map(p => p.id).join(',')],
+    queryFn: async () => {
+      if (!user?.id || posts.length === 0) return [];
+      const ids = await getUserLikedPostIds(user.id, posts.map(p => p.id));
+      setLikedPostIds(ids);
+      return ids;
+    },
+    enabled: !!user?.id && posts.length > 0,
+  });
+
+  const handleLikeChange = useCallback((postId: string, liked: boolean) => {
+    setLikedPostIds(prev => 
+      liked ? [...prev, postId] : prev.filter(id => id !== postId)
+    );
+  }, []);
+
+  const handleRefresh = useCallback(() => {
+    refetch();
+  }, [refetch]);
+
+  const renderPost = useCallback(({ item }: { item: Post }) => (
     <View style={styles.postContainer}>
-      <PostCard post={item} showProjectInfo={true} />
+      <PostCard 
+        post={item} 
+        showProjectInfo={true}
+        isLiked={likedPostIds.includes(item.id)}
+        onLikeChange={handleLikeChange}
+      />
     </View>
-  );
+  ), [likedPostIds, handleLikeChange]);
+
+  const keyExtractor = useCallback((item: Post) => item.id, []);
 
   if (isLoading) {
     return (
@@ -65,13 +95,13 @@ export default function HomeScreen() {
       <FlatList
         data={posts}
         renderItem={renderPost}
-        keyExtractor={(item) => item.id}
+        keyExtractor={keyExtractor}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
             refreshing={isRefetching}
-            onRefresh={refetch}
+            onRefresh={handleRefresh}
             tintColor={Colors.primary}
             colors={[Colors.primary]}
           />

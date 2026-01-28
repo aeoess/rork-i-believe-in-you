@@ -1,14 +1,16 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, ActivityIndicator, RefreshControl, Alert, Modal, TextInput } from 'react-native';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Users, Heart, Globe, ExternalLink, Edit3, Plus, Trash2, MoreVertical } from 'lucide-react-native';
-import { getProject, getProjectPosts, getProjectMilestones, getProjectSupportMessages, isFollowingProject, updateProject, deletePost, createMilestone, updateMilestone, deleteMilestone, toggleMilestoneComplete, Milestone } from '@/lib/database';
+import { Users, Heart, Globe, ExternalLink, Edit3, Plus, Trash2, Check } from 'lucide-react-native';
+import { getProject, getProjectPosts, getProjectMilestones, getProjectSupportMessages, isFollowingProject, updateProject, deletePost, createMilestone, updateMilestone, deleteMilestone, toggleMilestoneComplete, followProject, unfollowProject, getUserLikedPostIds, Milestone, Post } from '@/lib/database';
 import { useAuth } from '@/contexts/AuthContext';
+import { useToast } from '@/contexts/ToastContext';
 import CreatorRow from '@/components/CreatorRow';
 import PostCard from '@/components/PostCard';
 import MilestoneItem from '@/components/MilestoneItem';
 import SupportMessageBubble from '@/components/SupportMessageBubble';
+import SupportModal from '@/components/SupportModal';
 import Colors from '@/constants/colors';
 
 type TabType = 'about' | 'updates' | 'milestones';
@@ -22,15 +24,18 @@ const MOOD_CONFIG = {
 
 export default function ProjectPage() {
   const { slug } = useLocalSearchParams<{ slug: string }>();
-  const { user, builderProfile } = useAuth();
+  const { user, refreshProfile } = useAuth();
   const router = useRouter();
   const queryClient = useQueryClient();
+  const { showToast, showKarmaToast } = useToast();
   const [activeTab, setActiveTab] = useState<TabType>('about');
   const [showMoodPicker, setShowMoodPicker] = useState(false);
   const [showMilestoneModal, setShowMilestoneModal] = useState(false);
+  const [showSupportModal, setShowSupportModal] = useState(false);
   const [editingMilestone, setEditingMilestone] = useState<Milestone | null>(null);
   const [milestoneTitle, setMilestoneTitle] = useState('');
   const [milestoneDescription, setMilestoneDescription] = useState('');
+  const [likedPostIds, setLikedPostIds] = useState<string[]>([]);
 
   const { data: project, isLoading, refetch, isRefetching } = useQuery({
     queryKey: ['project', slug],
@@ -50,25 +55,89 @@ export default function ProjectPage() {
     enabled: !!project?.id,
   });
 
-  const { data: supportMessages = [] } = useQuery({
+  const { data: supportMessages = [], refetch: refetchMessages } = useQuery({
     queryKey: ['projectSupportMessages', project?.id],
     queryFn: () => getProjectSupportMessages(project?.id || '', 5),
     enabled: !!project?.id,
   });
 
-  const { data: isFollowing = false } = useQuery({
+  const { data: isFollowing = false, refetch: refetchFollowing } = useQuery({
     queryKey: ['isFollowing', user?.id, project?.id],
     queryFn: () => isFollowingProject(user?.id || '', project?.id || ''),
     enabled: !!user?.id && !!project?.id,
   });
 
+  useQuery({
+    queryKey: ['projectPostLikes', user?.id, posts.map(p => p.id).join(',')],
+    queryFn: async () => {
+      if (!user?.id || posts.length === 0) return [];
+      const ids = await getUserLikedPostIds(user.id, posts.map(p => p.id));
+      setLikedPostIds(ids);
+      return ids;
+    },
+    enabled: !!user?.id && posts.length > 0,
+  });
+
   const isOwner = project?.builder?.user_id === user?.id;
+  const [localFollowerCount, setLocalFollowerCount] = useState<number | null>(null);
+  const followerCount = localFollowerCount ?? project?.follower_count ?? 0;
+  const [localIsFollowing, setLocalIsFollowing] = useState<boolean | null>(null);
+  const following = localIsFollowing ?? isFollowing;
+
+  const followMutation = useMutation({
+    mutationFn: async () => {
+      if (!user?.id || !project?.id) throw new Error('Not authenticated');
+      return followProject(user.id, project.id);
+    },
+    onMutate: () => {
+      setLocalIsFollowing(true);
+      setLocalFollowerCount(followerCount + 1);
+    },
+    onSuccess: () => {
+      showKarmaToast(5, 'Followed!');
+      queryClient.invalidateQueries({ queryKey: ['project', slug] });
+      queryClient.invalidateQueries({ queryKey: ['followedProjects'] });
+      queryClient.invalidateQueries({ queryKey: ['isFollowing'] });
+      queryClient.invalidateQueries({ queryKey: ['userSupportActions'] });
+      queryClient.invalidateQueries({ queryKey: ['userSupportStats'] });
+      refreshProfile();
+    },
+    onError: () => {
+      setLocalIsFollowing(false);
+      setLocalFollowerCount(followerCount - 1);
+      showToast('Failed to follow project', 'error');
+    },
+  });
+
+  const unfollowMutation = useMutation({
+    mutationFn: async () => {
+      if (!user?.id || !project?.id) throw new Error('Not authenticated');
+      return unfollowProject(user.id, project.id);
+    },
+    onMutate: () => {
+      setLocalIsFollowing(false);
+      setLocalFollowerCount(Math.max(0, followerCount - 1));
+    },
+    onSuccess: () => {
+      showToast('Unfollowed project');
+      queryClient.invalidateQueries({ queryKey: ['project', slug] });
+      queryClient.invalidateQueries({ queryKey: ['followedProjects'] });
+      queryClient.invalidateQueries({ queryKey: ['isFollowing'] });
+      queryClient.invalidateQueries({ queryKey: ['feedPosts'] });
+    },
+    onError: () => {
+      setLocalIsFollowing(true);
+      setLocalFollowerCount(followerCount + 1);
+      showToast('Failed to unfollow project', 'error');
+    },
+  });
 
   const updateMoodMutation = useMutation({
     mutationFn: (mood: MoodType) => updateProject(project!.id, { mood }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['project', slug] });
       setShowMoodPicker(false);
+      showToast('Mood updated!');
     },
   });
 
@@ -77,6 +146,7 @@ export default function ProjectPage() {
     onSuccess: () => {
       refetchPosts();
       queryClient.invalidateQueries({ queryKey: ['feedPosts'] });
+      showToast('Update deleted');
     },
   });
 
@@ -91,6 +161,7 @@ export default function ProjectPage() {
       setShowMilestoneModal(false);
       setMilestoneTitle('');
       setMilestoneDescription('');
+      showToast('Milestone added!');
     },
   });
 
@@ -105,6 +176,7 @@ export default function ProjectPage() {
       setEditingMilestone(null);
       setMilestoneTitle('');
       setMilestoneDescription('');
+      showToast('Milestone updated!');
     },
   });
 
@@ -116,16 +188,31 @@ export default function ProjectPage() {
 
   const deleteMilestoneMutation = useMutation({
     mutationFn: (id: string) => deleteMilestone(id),
-    onSuccess: () => refetchMilestones(),
+    onSuccess: () => {
+      refetchMilestones();
+      showToast('Milestone deleted');
+    },
   });
 
-  const handleFollowPress = () => {
-    Alert.alert('Coming Soon', 'Follow functionality will be available soon!');
-  };
+  const handleFollowPress = useCallback(() => {
+    if (!user) {
+      showToast('Please sign in to follow projects', 'error');
+      return;
+    }
+    if (following) {
+      unfollowMutation.mutate();
+    } else {
+      followMutation.mutate();
+    }
+  }, [user, following, followMutation, unfollowMutation, showToast]);
 
-  const handleSupportPress = () => {
-    Alert.alert('Coming Soon', 'Send support functionality will be available soon!');
-  };
+  const handleSupportPress = useCallback(() => {
+    if (!user) {
+      showToast('Please sign in to send support', 'error');
+      return;
+    }
+    setShowSupportModal(true);
+  }, [user, showToast]);
 
   const handleEditProject = () => {
     router.push(`/edit-project?slug=${slug}`);
@@ -191,6 +278,20 @@ export default function ProjectPage() {
     }
   };
 
+  const handleLikeChange = useCallback((postId: string, liked: boolean) => {
+    setLikedPostIds(prev => 
+      liked ? [...prev, postId] : prev.filter(id => id !== postId)
+    );
+  }, []);
+
+  const handleRefresh = useCallback(() => {
+    refetch();
+    refetchPosts();
+    refetchMilestones();
+    refetchMessages();
+    refetchFollowing();
+  }, [refetch, refetchPosts, refetchMilestones, refetchMessages, refetchFollowing]);
+
   if (isLoading) {
     return (
       <View style={styles.loadingContainer}>
@@ -205,6 +306,9 @@ export default function ProjectPage() {
       <View style={styles.errorContainer}>
         <Stack.Screen options={{ title: 'Not Found' }} />
         <Text style={styles.errorText}>Project not found</Text>
+        <TouchableOpacity style={styles.retryButton} onPress={() => refetch()}>
+          <Text style={styles.retryText}>Retry</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -218,7 +322,7 @@ export default function ProjectPage() {
       refreshControl={
         <RefreshControl
           refreshing={isRefetching}
-          onRefresh={refetch}
+          onRefresh={handleRefresh}
           tintColor={Colors.primary}
           colors={[Colors.primary]}
         />
@@ -272,23 +376,25 @@ export default function ProjectPage() {
         <View style={styles.statsRow}>
           <View style={styles.statItem}>
             <Users size={18} color={Colors.textSecondary} />
-            <Text style={styles.statValue}>{project.follower_count}</Text>
+            <Text style={styles.statValue}>{followerCount}</Text>
             <Text style={styles.statLabel}>supporters</Text>
           </View>
         </View>
 
         <View style={styles.actionsRow}>
           <TouchableOpacity 
-            style={[styles.followButton, isFollowing && styles.followingButton]} 
+            style={[styles.followButton, following && styles.followingButton]} 
             onPress={handleFollowPress}
+            disabled={followMutation.isPending || unfollowMutation.isPending}
           >
-            <Text style={[styles.followButtonText, isFollowing && styles.followingButtonText]}>
-              {isFollowing ? 'Following' : 'Follow'}
+            {following && <Check size={16} color={Colors.textInverse} />}
+            <Text style={[styles.followButtonText, following && styles.followingButtonText]}>
+              {following ? 'Following' : 'Follow'}
             </Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.supportButton} onPress={handleSupportPress}>
             <Heart size={18} color={Colors.textInverse} fill={Colors.textInverse} />
-            <Text style={styles.supportButtonText}>Send Support 💜</Text>
+            <Text style={styles.supportButtonText}>Send Support</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -324,7 +430,14 @@ export default function ProjectPage() {
             {project.description ? (
               <Text style={styles.description}>{project.description}</Text>
             ) : (
-              <Text style={styles.noContent}>No description yet</Text>
+              <View style={styles.emptySection}>
+                <Text style={styles.noContent}>No description yet</Text>
+                {isOwner && (
+                  <TouchableOpacity onPress={handleEditProject}>
+                    <Text style={styles.addLink}>Add description</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
             )}
 
             {project.builder?.website_url && (
@@ -348,7 +461,12 @@ export default function ProjectPage() {
             {posts.length > 0 ? (
               posts.map((post) => (
                 <View key={post.id} style={styles.postItem}>
-                  <PostCard post={post} showProjectInfo={false} />
+                  <PostCard 
+                    post={post} 
+                    showProjectInfo={false}
+                    isLiked={likedPostIds.includes(post.id)}
+                    onLikeChange={handleLikeChange}
+                  />
                   {isOwner && (
                     <TouchableOpacity 
                       style={styles.deletePostButton}
@@ -360,7 +478,12 @@ export default function ProjectPage() {
                 </View>
               ))
             ) : (
-              <Text style={styles.noContent}>No updates yet</Text>
+              <View style={styles.emptySection}>
+                <Text style={styles.noContent}>No updates yet</Text>
+                {isOwner && (
+                  <Text style={styles.emptyHint}>Share your first update with your supporters!</Text>
+                )}
+              </View>
             )}
           </View>
         )}
@@ -387,7 +510,12 @@ export default function ProjectPage() {
                 />
               ))
             ) : (
-              <Text style={styles.noContent}>No milestones yet</Text>
+              <View style={styles.emptySection}>
+                <Text style={styles.noContent}>No milestones yet</Text>
+                {isOwner && (
+                  <Text style={styles.emptyHint}>Add milestones to track your progress!</Text>
+                )}
+              </View>
             )}
           </View>
         )}
@@ -493,6 +621,14 @@ export default function ProjectPage() {
           </View>
         </View>
       </Modal>
+
+      {project && (
+        <SupportModal
+          visible={showSupportModal}
+          onClose={() => setShowSupportModal(false)}
+          project={project}
+        />
+      )}
     </ScrollView>
   );
 }
@@ -513,10 +649,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: Colors.background,
+    padding: 20,
   },
   errorText: {
     fontSize: 16,
     color: Colors.textSecondary,
+    marginBottom: 16,
+  },
+  retryButton: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    backgroundColor: Colors.primary,
+    borderRadius: 8,
+  },
+  retryText: {
+    color: Colors.textInverse,
+    fontWeight: '600' as const,
   },
   headerButton: {
     padding: 8,
@@ -601,14 +749,18 @@ const styles = StyleSheet.create({
   },
   followButton: {
     flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
     paddingVertical: 14,
     borderRadius: 12,
     borderWidth: 2,
     borderColor: Colors.primary,
-    alignItems: 'center',
   },
   followingButton: {
     backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
   },
   followButtonText: {
     fontSize: 15,
@@ -666,10 +818,26 @@ const styles = StyleSheet.create({
     color: Colors.text,
     lineHeight: 24,
   },
+  emptySection: {
+    alignItems: 'center',
+    padding: 20,
+  },
   noContent: {
     fontSize: 15,
     color: Colors.textTertiary,
     fontStyle: 'italic',
+  },
+  emptyHint: {
+    fontSize: 14,
+    color: Colors.textTertiary,
+    marginTop: 8,
+    textAlign: 'center',
+  },
+  addLink: {
+    fontSize: 14,
+    color: Colors.primary,
+    fontWeight: '500' as const,
+    marginTop: 8,
   },
   linkRow: {
     flexDirection: 'row',

@@ -77,6 +77,50 @@ export interface SupportMessage {
   sender?: Builder;
 }
 
+export interface Like {
+  id: string;
+  user_id: string;
+  post_id: string;
+  created_at: string;
+}
+
+export interface SupportAction {
+  id: string;
+  user_id: string;
+  project_id: string;
+  action_type: 'follow' | 'message' | 'like';
+  points_earned: number;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+  project?: Project;
+}
+
+export const KARMA_LEVELS = [
+  { min: 0, max: 50, label: 'New Supporter', emoji: '🌱' },
+  { min: 51, max: 200, label: 'Supporter', emoji: '💚' },
+  { min: 201, max: 500, label: 'Super Supporter', emoji: '💜' },
+  { min: 501, max: 1000, label: 'Champion', emoji: '⭐' },
+  { min: 1001, max: Infinity, label: 'Legend', emoji: '👑' },
+];
+
+export function getKarmaLevel(points: number) {
+  for (let i = KARMA_LEVELS.length - 1; i >= 0; i--) {
+    if (points >= KARMA_LEVELS[i].min) {
+      return KARMA_LEVELS[i];
+    }
+  }
+  return KARMA_LEVELS[0];
+}
+
+export function getNextKarmaLevel(points: number) {
+  for (const level of KARMA_LEVELS) {
+    if (points < level.min) {
+      return level;
+    }
+  }
+  return null;
+}
+
 export async function getCurrentUser() {
   const { data: { user }, error } = await supabase.auth.getUser();
   if (error) {
@@ -710,4 +754,335 @@ export async function updateBuilderProfileFull(
 
   console.log('Builder profile updated:', data);
   return data;
+}
+
+// ==================== FOLLOWS ====================
+
+export async function followProject(userId: string, projectId: string): Promise<boolean> {
+  console.log('Following project:', projectId);
+  
+  const { error: followError } = await supabase
+    .from('follows')
+    .insert({ user_id: userId, project_id: projectId });
+
+  if (followError) {
+    console.log('Error following project:', followError.message);
+    return false;
+  }
+
+  await supabase.rpc('increment_follower_count', { p_project_id: projectId }).catch(() => {
+    supabase
+      .from('projects')
+      .update({ follower_count: supabase.rpc('increment', { x: 1 }) })
+      .eq('id', projectId);
+  });
+
+  await logSupportAction(userId, projectId, 'follow', 5);
+  await addKarma(userId, 5);
+
+  console.log('Successfully followed project');
+  return true;
+}
+
+export async function unfollowProject(userId: string, projectId: string): Promise<boolean> {
+  console.log('Unfollowing project:', projectId);
+  
+  const { error } = await supabase
+    .from('follows')
+    .delete()
+    .eq('user_id', userId)
+    .eq('project_id', projectId);
+
+  if (error) {
+    console.log('Error unfollowing project:', error.message);
+    return false;
+  }
+
+  await supabase.rpc('decrement_follower_count', { p_project_id: projectId }).catch(() => {
+    console.log('RPC not available, follower count may be stale');
+  });
+
+  console.log('Successfully unfollowed project');
+  return true;
+}
+
+export async function isFollowing(userId: string, projectId: string): Promise<boolean> {
+  return isFollowingProject(userId, projectId);
+}
+
+// ==================== SUPPORT MESSAGES ====================
+
+export async function sendSupportMessage(params: {
+  userId: string;
+  projectId: string;
+  message: string;
+  isAnonymous: boolean;
+}): Promise<SupportMessage | null> {
+  console.log('Sending support message to project:', params.projectId);
+  
+  const { data: builder } = await supabase
+    .from('builders')
+    .select('id')
+    .eq('user_id', params.userId)
+    .single();
+
+  if (!builder) {
+    console.log('Builder not found for user');
+    return null;
+  }
+
+  const { data, error } = await supabase
+    .from('support_messages')
+    .insert({
+      project_id: params.projectId,
+      sender_id: builder.id,
+      message: params.message,
+      is_anonymous: params.isAnonymous,
+    })
+    .select(`
+      *,
+      sender:builders(*)
+    `)
+    .single();
+
+  if (error) {
+    console.log('Error sending support message:', error.message);
+    return null;
+  }
+
+  await logSupportAction(params.userId, params.projectId, 'message', 10);
+  await addKarma(params.userId, 10);
+
+  console.log('Support message sent:', data);
+  return data;
+}
+
+// ==================== LIKES ====================
+
+export async function likePost(userId: string, postId: string, projectId: string): Promise<boolean> {
+  console.log('Liking post:', postId);
+  
+  const { error } = await supabase
+    .from('likes')
+    .insert({ user_id: userId, post_id: postId });
+
+  if (error) {
+    if (error.code === '23505') {
+      console.log('Already liked this post');
+      return true;
+    }
+    console.log('Error liking post:', error.message);
+    return false;
+  }
+
+  await supabase
+    .from('posts')
+    .update({ like_count: supabase.rpc('increment', { x: 1 }) })
+    .eq('id', postId)
+    .catch(() => console.log('Could not increment like count'));
+
+  await logSupportAction(userId, projectId, 'like', 1);
+  await addKarma(userId, 1);
+
+  console.log('Successfully liked post');
+  return true;
+}
+
+export async function unlikePost(userId: string, postId: string): Promise<boolean> {
+  console.log('Unliking post:', postId);
+  
+  const { error } = await supabase
+    .from('likes')
+    .delete()
+    .eq('user_id', userId)
+    .eq('post_id', postId);
+
+  if (error) {
+    console.log('Error unliking post:', error.message);
+    return false;
+  }
+
+  await supabase
+    .from('posts')
+    .update({ like_count: supabase.rpc('decrement', { x: 1 }) })
+    .eq('id', postId)
+    .catch(() => console.log('Could not decrement like count'));
+
+  console.log('Successfully unliked post');
+  return true;
+}
+
+export async function isPostLiked(userId: string, postId: string): Promise<boolean> {
+  const { data } = await supabase
+    .from('likes')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('post_id', postId)
+    .single();
+
+  return !!data;
+}
+
+export async function getUserLikedPostIds(userId: string, postIds: string[]): Promise<string[]> {
+  if (postIds.length === 0) return [];
+  
+  console.log('Getting liked post IDs for user:', userId);
+  const { data, error } = await supabase
+    .from('likes')
+    .select('post_id')
+    .eq('user_id', userId)
+    .in('post_id', postIds);
+
+  if (error) {
+    console.log('Error getting liked posts:', error.message);
+    return [];
+  }
+
+  return data?.map(d => d.post_id) || [];
+}
+
+// ==================== KARMA ====================
+
+export async function addKarma(userId: string, points: number): Promise<Karma | null> {
+  console.log('Adding karma:', points, 'to user:', userId);
+  
+  const { data: currentKarma } = await supabase
+    .from('karma')
+    .select('*')
+    .eq('user_id', userId)
+    .single();
+
+  if (!currentKarma) {
+    console.log('Karma record not found');
+    return null;
+  }
+
+  const newTotal = currentKarma.total_points + points;
+  const newLevel = getKarmaLevel(newTotal);
+  const levelNumber = KARMA_LEVELS.findIndex(l => l.label === newLevel.label) + 1;
+
+  const { data, error } = await supabase
+    .from('karma')
+    .update({
+      total_points: newTotal,
+      level: levelNumber,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('user_id', userId)
+    .select('*')
+    .single();
+
+  if (error) {
+    console.log('Error updating karma:', error.message);
+    return null;
+  }
+
+  console.log('Karma updated:', data);
+  return data;
+}
+
+export async function getUserKarma(userId: string): Promise<Karma | null> {
+  return getKarma(userId);
+}
+
+// ==================== SUPPORT ACTIONS ====================
+
+export async function logSupportAction(
+  userId: string,
+  projectId: string,
+  actionType: 'follow' | 'message' | 'like',
+  pointsEarned: number,
+  metadata?: Record<string, unknown>
+): Promise<void> {
+  console.log('Logging support action:', actionType);
+  
+  await supabase
+    .from('support_actions')
+    .insert({
+      user_id: userId,
+      project_id: projectId,
+      action_type: actionType,
+      points_earned: pointsEarned,
+      metadata: metadata || null,
+    })
+    .catch(err => console.log('Error logging support action:', err.message));
+}
+
+export async function getUserSupportActions(userId: string, limit: number = 20): Promise<SupportAction[]> {
+  console.log('Getting support actions for user:', userId);
+  
+  const { data, error } = await supabase
+    .from('support_actions')
+    .select(`
+      *,
+      project:projects(id, title, public_slug, cover_image_url)
+    `)
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    console.log('Error getting support actions:', error.message);
+    return [];
+  }
+
+  return (data as unknown as SupportAction[]) || [];
+}
+
+export async function getUserSupportStats(userId: string): Promise<{
+  projectsSupported: number;
+  messagesSent: number;
+  postsLiked: number;
+}> {
+  console.log('Getting support stats for user:', userId);
+  
+  const { count: followCount } = await supabase
+    .from('follows')
+    .select('*', { count: 'exact', head: true })
+    .eq('user_id', userId);
+
+  const { data: builder } = await supabase
+    .from('builders')
+    .select('id')
+    .eq('user_id', userId)
+    .single();
+
+  let messageCount = 0;
+  if (builder) {
+    const { count } = await supabase
+      .from('support_messages')
+      .select('*', { count: 'exact', head: true })
+      .eq('sender_id', builder.id);
+    messageCount = count || 0;
+  }
+
+  const { count: likeCount } = await supabase
+    .from('likes')
+    .select('*', { count: 'exact', head: true })
+    .eq('user_id', userId);
+
+  return {
+    projectsSupported: followCount || 0,
+    messagesSent: messageCount,
+    postsLiked: likeCount || 0,
+  };
+}
+
+export async function getProjectSupporters(projectId: string): Promise<Builder[]> {
+  console.log('Getting supporters for project:', projectId);
+  
+  const { data, error } = await supabase
+    .from('follows')
+    .select(`
+      user:builders!follows_user_id_fkey(*)
+    `)
+    .eq('project_id', projectId)
+    .limit(50);
+
+  if (error) {
+    console.log('Error getting project supporters:', error.message);
+    return [];
+  }
+
+  return (data?.map(d => d.user).filter(Boolean) as unknown as Builder[]) || [];
 }

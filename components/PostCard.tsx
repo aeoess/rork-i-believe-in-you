@@ -1,33 +1,109 @@
-import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
-import { Heart, User } from 'lucide-react-native';
+import { useState, useEffect, useCallback } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Image, Animated } from 'react-native';
+import { Heart } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
-import { Post } from '@/lib/database';
+import { useMutation } from '@tanstack/react-query';
+import { Post, likePost, unlikePost } from '@/lib/database';
+import { useAuth } from '@/contexts/AuthContext';
+import { useToast } from '@/contexts/ToastContext';
 import { formatRelativeTime } from '@/utils/timeFormat';
 import Colors from '@/constants/colors';
 
 interface PostCardProps {
   post: Post;
   showProjectInfo?: boolean;
+  isLiked?: boolean;
+  onLikeChange?: (postId: string, liked: boolean) => void;
 }
 
-export default function PostCard({ post, showProjectInfo = true }: PostCardProps) {
+export default function PostCard({ post, showProjectInfo = true, isLiked = false, onLikeChange }: PostCardProps) {
   const router = useRouter();
+  const { user, refreshProfile } = useAuth();
+  const { showKarmaToast, showToast } = useToast();
+  const [liked, setLiked] = useState(isLiked);
+  const [likeCount, setLikeCount] = useState(post.like_count);
+  const scaleAnim = useState(() => new Animated.Value(1))[0];
 
-  const handleProjectPress = () => {
+  useEffect(() => {
+    setLiked(isLiked);
+  }, [isLiked]);
+
+  useEffect(() => {
+    setLikeCount(post.like_count);
+  }, [post.like_count]);
+
+  const likeMutation = useMutation({
+    mutationFn: async () => {
+      if (!user) throw new Error('Not authenticated');
+      const projectId = post.project_id || post.project?.id || '';
+      return likePost(user.id, post.id, projectId);
+    },
+    onSuccess: () => {
+      showKarmaToast(1);
+      refreshProfile();
+    },
+    onError: () => {
+      setLiked(false);
+      setLikeCount((prev) => prev - 1);
+      showToast('Failed to like post', 'error');
+    },
+  });
+
+  const unlikeMutation = useMutation({
+    mutationFn: async () => {
+      if (!user) throw new Error('Not authenticated');
+      return unlikePost(user.id, post.id);
+    },
+    onError: () => {
+      setLiked(true);
+      setLikeCount((prev) => prev + 1);
+      showToast('Failed to unlike post', 'error');
+    },
+  });
+
+  const handleProjectPress = useCallback(() => {
     if (post.project?.public_slug) {
       router.push(`/project/${post.project.public_slug}`);
     }
-  };
+  }, [post.project?.public_slug, router]);
 
-  const handleCreatorPress = () => {
+  const handleCreatorPress = useCallback(() => {
     if (post.project?.builder?.id) {
       router.push(`/creator/${post.project.builder.id}`);
     }
-  };
+  }, [post.project?.builder?.id, router]);
 
-  const handleLikePress = () => {
-    console.log('Like pressed - coming soon');
-  };
+  const handleLikePress = useCallback(() => {
+    if (!user) {
+      showToast('Please sign in to like posts', 'error');
+      return;
+    }
+
+    Animated.sequence([
+      Animated.timing(scaleAnim, {
+        toValue: 1.3,
+        duration: 100,
+        useNativeDriver: true,
+      }),
+      Animated.timing(scaleAnim, {
+        toValue: 1,
+        duration: 100,
+        useNativeDriver: true,
+      }),
+    ]).start();
+
+    if (liked) {
+      setLiked(false);
+      setLikeCount((prev) => Math.max(0, prev - 1));
+      onLikeChange?.(post.id, false);
+      unlikeMutation.mutate();
+    } else {
+      setLiked(true);
+      setLikeCount((prev) => prev + 1);
+      onLikeChange?.(post.id, true);
+      likeMutation.mutate();
+    }
+  }, [user, liked, post.id, likeMutation, unlikeMutation, onLikeChange, scaleAnim, showToast]);
 
   return (
     <View style={styles.card} testID={`post-card-${post.id}`}>
@@ -85,9 +161,21 @@ export default function PostCard({ post, showProjectInfo = true }: PostCardProps
       )}
 
       <View style={styles.footer}>
-        <TouchableOpacity style={styles.likeButton} onPress={handleLikePress}>
-          <Heart size={20} color={Colors.textTertiary} />
-          <Text style={styles.likeCount}>{post.like_count}</Text>
+        <TouchableOpacity 
+          style={styles.likeButton} 
+          onPress={handleLikePress}
+          activeOpacity={0.7}
+        >
+          <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
+            <Heart 
+              size={20} 
+              color={liked ? Colors.error : Colors.textTertiary} 
+              fill={liked ? Colors.error : 'transparent'}
+            />
+          </Animated.View>
+          <Text style={[styles.likeCount, liked && styles.likeCountActive]}>
+            {likeCount}
+          </Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -197,9 +285,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    marginLeft: -8,
+    borderRadius: 8,
   },
   likeCount: {
     fontSize: 14,
     color: Colors.textTertiary,
+  },
+  likeCountActive: {
+    color: Colors.error,
+    fontWeight: '500' as const,
   },
 });

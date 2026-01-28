@@ -4,6 +4,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
+import { ToastProvider, ToastContainer } from '@/contexts/ToastContext';
 import Colors from '@/constants/colors';
 
 SplashScreen.preventAutoHideAsync();
@@ -67,7 +68,10 @@ export default function RootLayout() {
     <QueryClientProvider client={queryClient}>
       <GestureHandlerRootView style={{ flex: 1 }}>
         <AuthProvider>
-          <RootLayoutNav />
+          <ToastProvider>
+            <RootLayoutNav />
+            <ToastContainer />
+          </ToastProvider>
         </AuthProvider>
       </GestureHandlerRootView>
     </QueryClientProvider>
