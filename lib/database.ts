@@ -770,12 +770,10 @@ export async function followProject(userId: string, projectId: string): Promise<
     return false;
   }
 
-  await supabase.rpc('increment_follower_count', { p_project_id: projectId }).catch(() => {
-    supabase
-      .from('projects')
-      .update({ follower_count: supabase.rpc('increment', { x: 1 }) })
-      .eq('id', projectId);
-  });
+  const { error: rpcError } = await supabase.rpc('increment_follower_count', { p_project_id: projectId });
+  if (rpcError) {
+    console.log('RPC increment not available:', rpcError.message);
+  }
 
   await logSupportAction(userId, projectId, 'follow', 5);
   await addKarma(userId, 5);
@@ -798,9 +796,10 @@ export async function unfollowProject(userId: string, projectId: string): Promis
     return false;
   }
 
-  await supabase.rpc('decrement_follower_count', { p_project_id: projectId }).catch(() => {
-    console.log('RPC not available, follower count may be stale');
-  });
+  const { error: rpcError } = await supabase.rpc('decrement_follower_count', { p_project_id: projectId });
+  if (rpcError) {
+    console.log('RPC decrement not available:', rpcError.message);
+  }
 
   console.log('Successfully unfollowed project');
   return true;
@@ -875,11 +874,13 @@ export async function likePost(userId: string, postId: string, projectId: string
     return false;
   }
 
-  await supabase
+  const { error: updateError } = await supabase
     .from('posts')
     .update({ like_count: supabase.rpc('increment', { x: 1 }) })
-    .eq('id', postId)
-    .catch(() => console.log('Could not increment like count'));
+    .eq('id', postId);
+  if (updateError) {
+    console.log('Could not increment like count:', updateError.message);
+  }
 
   await logSupportAction(userId, projectId, 'like', 1);
   await addKarma(userId, 1);
@@ -902,11 +903,13 @@ export async function unlikePost(userId: string, postId: string): Promise<boolea
     return false;
   }
 
-  await supabase
+  const { error: updateError } = await supabase
     .from('posts')
     .update({ like_count: supabase.rpc('decrement', { x: 1 }) })
-    .eq('id', postId)
-    .catch(() => console.log('Could not decrement like count'));
+    .eq('id', postId);
+  if (updateError) {
+    console.log('Could not decrement like count:', updateError.message);
+  }
 
   console.log('Successfully unliked post');
   return true;
@@ -996,7 +999,7 @@ export async function logSupportAction(
 ): Promise<void> {
   console.log('Logging support action:', actionType);
   
-  await supabase
+  const { error: insertError } = await supabase
     .from('support_actions')
     .insert({
       user_id: userId,
@@ -1004,8 +1007,10 @@ export async function logSupportAction(
       action_type: actionType,
       points_earned: pointsEarned,
       metadata: metadata || null,
-    })
-    .catch(err => console.log('Error logging support action:', err.message));
+    });
+  if (insertError) {
+    console.log('Error logging support action:', insertError.message);
+  }
 }
 
 export async function getUserSupportActions(userId: string, limit: number = 20): Promise<SupportAction[]> {
