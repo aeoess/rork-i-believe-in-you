@@ -80,9 +80,10 @@ export default function CreateProjectScreen() {
       refreshProfile();
       router.replace(`/project/${project.public_slug}`);
     },
-    onError: (error) => {
-      console.log('Create project error:', error);
-      Alert.alert('Error', 'Failed to create project. Please try again.');
+    onError: (error: Error) => {
+      console.log('Create project error:', error.message);
+      console.log('Full error:', JSON.stringify(error, null, 2));
+      Alert.alert('Error', `Failed to create project: ${error.message}`);
     },
   });
 

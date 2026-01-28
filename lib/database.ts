@@ -513,7 +513,7 @@ export async function createProject(params: {
   cover_image_url?: string;
   public_slug: string;
 }): Promise<Project | null> {
-  console.log('Creating project:', params.title);
+  console.log('Creating project with params:', JSON.stringify(params, null, 2));
   
   const { data, error } = await supabase
     .from('projects')
@@ -535,11 +535,15 @@ export async function createProject(params: {
     .single();
 
   if (error) {
-    console.log('Error creating project:', error.message);
+    console.log('Error creating project - Full error:', JSON.stringify(error, null, 2));
+    console.log('Error code:', error.code);
+    console.log('Error message:', error.message);
+    console.log('Error details:', error.details);
+    console.log('Error hint:', error.hint);
     return null;
   }
 
-  console.log('Project created:', data);
+  console.log('Project created successfully:', data);
   return data;
 }
 
