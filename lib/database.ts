@@ -515,36 +515,47 @@ export async function createProject(params: {
 }): Promise<Project | null> {
   console.log('Creating project with params:', JSON.stringify(params, null, 2));
   
-  const { data, error } = await supabase
-    .from('projects')
-    .insert({
-      builder_id: params.builder_id,
-      title: params.title,
-      tagline: params.tagline,
-      description: params.description || null,
-      cover_image_url: params.cover_image_url || null,
-      public_slug: params.public_slug,
-      mood: 'green',
-      follower_count: 0,
-      is_published: true,
-    })
-    .select(`
-      *,
-      builder:builders(*)
-    `)
-    .single();
+  try {
+    const { data, error } = await supabase
+      .from('projects')
+      .insert({
+        builder_id: params.builder_id,
+        title: params.title,
+        tagline: params.tagline,
+        description: params.description || null,
+        cover_image_url: params.cover_image_url || null,
+        public_slug: params.public_slug,
+        mood: 'green',
+        follower_count: 0,
+        is_published: true,
+      })
+      .select(`
+        *,
+        builder:builders(*)
+      `)
+      .single();
 
-  if (error) {
-    console.log('Error creating project - Full error:', JSON.stringify(error, null, 2));
-    console.log('Error code:', error.code);
-    console.log('Error message:', error.message);
-    console.log('Error details:', error.details);
-    console.log('Error hint:', error.hint);
-    return null;
+    if (error) {
+      console.log('Error creating project - Full error:', JSON.stringify(error, null, 2));
+      console.log('Error code:', error.code);
+      console.log('Error message:', error.message);
+      console.log('Error details:', error.details);
+      console.log('Error hint:', error.hint);
+      throw new Error(error.message || 'Failed to create project');
+    }
+
+    console.log('Project created successfully:', data);
+    return data;
+  } catch (err) {
+    console.log('Network/fetch error creating project:', err);
+    if (err instanceof Error) {
+      if (err.message === 'Failed to fetch') {
+        throw new Error('Network error - please check your connection and Supabase configuration');
+      }
+      throw err;
+    }
+    throw new Error('An unexpected error occurred');
   }
-
-  console.log('Project created successfully:', data);
-  return data;
 }
 
 export async function updateProject(
